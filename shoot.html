@@ -32,11 +32,11 @@
 <div id="stage"><canvas id="game"></canvas></div>
 <div id="hud">得分 <span id="score">0</span><br>連擊 <span class="mult" id="mult">x1</span><br>波次 <span id="wave">1</span><br>火力 <span id="power">Lv1</span></div>
 <div id="hearts">❤❤❤</div>
-<div id="hint">滑鼠/觸控拖曳移動 · 自動開火 · 子彈可抵銷敵彈 · 吃道具強化</div>
+<div id="hint">滑鼠/觸控拖曳移動 · 自動開火 · 可抵銷小兵子彈（魔王彈無法抵銷） · 吃道具強化</div>
 <div id="overlay">
   <h2>🚀 霓虹太空射擊</h2>
   <p>拖曳控制戰機，自動開火擊破敵軍。<br>
-     擊破越多連擊倍率越高。每 5 波會出現魔王！<br>
+     每 5 波出現魔王；打贏後小兵會逐步變強。魔王彈無法被抵銷。<br>
      掉落：<b>❤️</b> 加命（最多 10 顆） · <b>🔥</b> 火力/射速升級（可疊到 Lv6） · <b>🛡️</b> 護盾 · <b>⚡</b> 清場</p>
   <button id="btn">開始遊戲</button>
 </div>
@@ -136,20 +136,24 @@
   }
 
   // ---- 敵機 ----
+  function enemyGen(){return Math.max(0,Math.floor(bossClearedWave/5));}
   function spawnEnemy(){
+    const g=enemyGen();
+    const spd=1+g*0.2;
+    const fireMul=Math.max(0.4,1-g*0.12);
     const type=Math.random();
     let e;
-    if(wave>=5 && type<.12){ // 重型
-      e={x:rand(40,W-40),y:-30,r:22,hp:5,vx:rand(-30,30),vy:rand(40,70),fire:rand(1,2),
-         color:'#ff5470',score:50,kind:'heavy'};
-    } else if(type<.4){ // 側移
-      e={x:rand(40,W-40),y:-30,r:16,hp:2,vx:rand(60,120)*(Math.random()<.5?1:-1),vy:rand(50,80),
-         fire:rand(1.5,3),color:'#4fd1ff',score:20,kind:'zig'};
-    } else { // 直落
-      e={x:rand(40,W-40),y:-30,r:14,hp:1,vx:0,vy:rand(70,110),
-         fire:Math.random()<.5?rand(2,4):0,color:'#57ffb0',score:10,kind:'straight'};
+    if((wave>=5||g>0) && type<(0.12+g*0.07)){
+      e={x:rand(40,W-40),y:-30,r:22,hp:5+g*2,vx:rand(-30,30)*spd,vy:rand(40,70)*spd,
+         fire:rand(1,2)*fireMul,color:'#ff5470',score:50+g*20,kind:'heavy'};
+    } else if(type<.4){
+      e={x:rand(40,W-40),y:-30,r:16,hp:2+g,vx:rand(60,120)*(Math.random()<.5?1:-1)*spd,vy:rand(50,80)*spd,
+         fire:rand(1.5,3)*fireMul,color:'#4fd1ff',score:20+g*10,kind:'zig'};
+    } else {
+      e={x:rand(40,W-40),y:-30,r:14,hp:1+Math.floor(g/2),vx:0,vy:rand(70,110)*spd,
+         fire:Math.random()<.5?rand(2,4)*fireMul:0,color:'#57ffb0',score:10+g*6,kind:'straight'};
     }
-    e.maxhp=e.hp;
+    e.maxhp=e.hp;e.fireMul=fireMul;e.shotSpd=220*(1+g*0.12);
     enemies.push(e);
   }
   function isBossWave(){return wave>0&&wave%5===0;}
@@ -166,30 +170,33 @@
       score:500+wave*60,entering:true,dir:1
     };
   }
+  function addBossShot(x,y,vx,vy,r){
+    ebullets.push({x:x,y:y,vx:vx,vy:vy,r:r||6,hard:true});
+  }
   function bossShoot(){
     const b=boss;
     if(!b)return;
     if(ebullets.length>200)return;
     if(b.kind===0){
-      for(let k=-3;k<=3;k++)ebullets.push({x:b.x,y:b.y+28,vx:k*70,vy:230,r:6});
+      for(let k=-3;k<=3;k++)addBossShot(b.x,b.y+28,k*70,230,6);
     }else if(b.kind===1){
       const n=12+Math.min(8,Math.floor(wave/5));
       for(let i=0;i<n;i++){
         const a=i/n*Math.PI*2+t;
-        ebullets.push({x:b.x,y:b.y,vx:Math.cos(a)*180,vy:Math.sin(a)*180,r:5});
+        addBossShot(b.x,b.y,Math.cos(a)*180,Math.sin(a)*180,5);
       }
     }else{
       const a=Math.atan2(player.y-b.y,player.x-b.x);
       for(let k=-1;k<=1;k++){
         const ang=a+k*0.18;
-        ebullets.push({x:b.x,y:b.y+20,vx:Math.cos(ang)*260,vy:Math.sin(ang)*260,r:6});
+        addBossShot(b.x,b.y+20,Math.cos(ang)*260,Math.sin(ang)*260,6);
       }
-      ebullets.push({x:b.x-36,y:b.y,vx:-40,vy:220,r:5});
-      ebullets.push({x:b.x+36,y:b.y,vx:40,vy:220,r:5});
+      addBossShot(b.x-36,b.y,-40,220,5);
+      addBossShot(b.x+36,b.y,40,220,5);
     }
     if(b.hp<b.maxhp*0.45){
       const a=Math.atan2(player.y-b.y,player.x-b.x);
-      ebullets.push({x:b.x,y:b.y,vx:Math.cos(a)*300,vy:Math.sin(a)*300,r:7});
+      addBossShot(b.x,b.y,Math.cos(a)*300,Math.sin(a)*300,7);
     }
   }
 
@@ -281,7 +288,7 @@
       spawnBoss();
     }
     spawnTimer-=dt;
-    const interval=Math.max(.35, 1.1 - wave*.05);
+    const interval=Math.max(.22, 1.1 - wave*.05 - enemyGen()*0.08);
     if(spawnTimer<=0 && !isBossWave() && !boss){
       spawnTimer=interval;
       spawnEnemy();
@@ -298,6 +305,7 @@
     // 己方子彈抵銷敵彈
     for(let i=ebullets.length-1;i>=0;i--){
       const eb=ebullets[i];
+      if(eb.hard)continue;
       for(let j=bullets.length-1;j>=0;j--){
         const b=bullets[j];
         const dx=b.x-eb.x,dy=b.y-eb.y;
@@ -318,9 +326,10 @@
       if(e.kind==='zig'){e.x+=Math.sin(t*4+e.y*.02)*1.5;if(e.x<20||e.x>W-20)e.vx*=-1;}
       e.fire-=dt;
       if(e.fire<=0 && e.y>0 && e.y<H-150){
-        e.fire=e.kind==='heavy'?rand(1,1.8):rand(2,3.5);
+        e.fire=(e.kind==='heavy'?rand(1,1.8):rand(2,3.5))*(e.fireMul||1);
         const a=Math.atan2(player.y-e.y,player.x-e.x);
-        ebullets.push({x:e.x,y:e.y,vx:Math.cos(a)*220,vy:Math.sin(a)*220,r:5});
+        const sp=e.shotSpd||220;
+        ebullets.push({x:e.x,y:e.y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,r:5,hard:false});
       }
       if(e.y>H+40){enemies.splice(i,1);continue;}
       // 子彈打敵
@@ -441,8 +450,12 @@
     ctx.fillStyle='#57ffb0';
     for(const b of bullets){ctx.fillRect(b.x-2,b.y-8,4,12);}
     // 敵機子彈
-    ctx.fillStyle='#ff5470';
-    for(const b of ebullets){ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,7);ctx.fill();}
+    for(const b of ebullets){
+      ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,7);
+      ctx.fillStyle=b.hard?'#ffb057':'#ff5470';
+      ctx.fill();
+      if(b.hard){ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();}
+    }
 
     // 敵機
     for(const e of enemies)drawEnemy(e);
