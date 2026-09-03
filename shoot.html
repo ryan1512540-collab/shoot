@@ -26,11 +26,17 @@
     color:#06121f;background:#4fd1ff;transition:transform .08s,filter .15s;margin-top:4px}
   button:hover{filter:brightness(1.1)} button:active{transform:translateY(1px)}
   #hint{position:fixed;bottom:10px;left:0;right:0;text-align:center;font-size:12px;opacity:.5;pointer-events:none;z-index:5}
+  #ships{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;max-width:560px}
+  .ship{min-width:96px;max-width:120px;padding:8px 8px 10px;border-radius:12px;border:2px solid rgba(255,255,255,.2);
+    background:rgba(255,255,255,.06);color:#eaf2ff;font-size:13px;font-weight:700;cursor:pointer;margin:0}
+  .ship small{display:block;font-size:11px;font-weight:500;opacity:.8;margin-top:3px;line-height:1.35}
+  .ship.on{border-color:#4fd1ff;background:rgba(79,209,255,.2);box-shadow:0 0 0 1px #4fd1ff}
+  #shipName{font-size:13px;opacity:.75}
 </style>
 </head>
 <body>
 <div id="stage"><canvas id="game"></canvas></div>
-<div id="hud">得分 <span id="score">0</span><br>連擊 <span class="mult" id="mult">x1</span><br>波次 <span id="wave">1</span><br>火力 <span id="power">Lv1</span></div>
+<div id="hud">得分 <span id="score">0</span><br>連擊 <span class="mult" id="mult">x1</span><br>波次 <span id="wave">1</span><br>火力 <span id="power">Lv1</span><br><span id="shipName">均衡</span></div>
 <div id="hearts">❤❤❤</div>
 <div id="hint">滑鼠/觸控拖曳移動 · 自動開火 · 可抵銷小兵子彈（魔王彈無法抵銷） · 吃道具強化</div>
 <div id="overlay">
@@ -38,6 +44,7 @@
   <p>拖曳控制戰機，自動開火擊破敵軍。<br>
      每 5 波出現魔王；打贏後小兵會逐步變強。魔王彈無法被抵銷。<br>
      掉落：<b>❤️</b> 加命（最多 10 顆） · <b>🔥</b> 火力/射速升級（可疊到 Lv6） · <b>🛡️</b> 護盾 · <b>⚡</b> 清場</p>
+  <div id="ships"></div>
   <button id="btn">開始遊戲</button>
 </div>
 
@@ -67,9 +74,35 @@
   const elWave=document.getElementById('wave'), elHearts=document.getElementById('hearts');
   const elPower=document.getElementById('power');
   const overlay=document.getElementById('overlay'), btn=document.getElementById('btn');
+  const elShipName=document.getElementById('shipName');
   const POWER_MAX=6, LIFE_MAX=10;
   const POWER_RATE=[0,0.18,0.15,0.12,0.10,0.08,0.06];
   const POWER_SHOTS=[0,1,2,3,4,5,7];
+  const SHIPS=[
+    {id:'balance',name:'均衡',desc:'標準扇形彈',color:'#4fd1ff',body:'#eaf2ff'},
+    {id:'rapid',name:'疾風',desc:'超高射速直線',color:'#57ffb0',body:'#d4fff0'},
+    {id:'spread',name:'散華',desc:'廣角散彈',color:'#ffb057',body:'#ffe8c8'},
+    {id:'pierce',name:'穿雲',desc:'子彈貫穿敵機',color:'#ffe566',body:'#fff4b0'},
+    {id:'home',name:'追星',desc:'自動追蹤彈',color:'#c89bff',body:'#edd9ff'}
+  ];
+  let shipId='balance';
+  function currentShip(){return SHIPS.find(s=>s.id===shipId)||SHIPS[0];}
+  (function buildShips(){
+    const box=document.getElementById('ships');
+    SHIPS.forEach(s=>{
+      const b=document.createElement('button');
+      b.type='button';b.className='ship'+(s.id===shipId?' on':'');b.dataset.id=s.id;
+      b.innerHTML=s.name+'<small>'+s.desc+'</small>';
+      b.style.borderColor=s.color;
+      b.addEventListener('pointerdown',function(e){e.preventDefault();e.stopPropagation();selectShip(s.id);});
+      box.appendChild(b);
+    });
+  })();
+  function selectShip(id){
+    shipId=id;
+    document.querySelectorAll('.ship').forEach(el=>el.classList.toggle('on',el.dataset.id===id));
+    elShipName.textContent=currentShip().name;
+  }
 
   function loadBest(){try{return +(localStorage.getItem('shooter_best')||0);}catch(e){return 0;}}
   function saveBest(v){try{localStorage.setItem('shooter_best',v);}catch(e){}}
@@ -94,26 +127,67 @@
     elMult.textContent='x'+mult;
     elWave.textContent=isBossWave()||boss?(wave+' 魔王'):wave;
     elPower.textContent=player.power>=POWER_MAX?'Lv6 滿等':'Lv'+player.power;
+    elShipName.textContent=currentShip().name;
     elHearts.textContent='❤'.repeat(Math.max(0,player.lives))+'♡'.repeat(Math.max(0,LIFE_MAX-player.lives));
   }
   function applyPower(){
     player.power=Math.max(1,Math.min(POWER_MAX,player.power));
-    player.fireRate=POWER_RATE[player.power];
+    const base=POWER_RATE[player.power];
+    const mul={balance:1,rapid:0.5,spread:1.45,pierce:1.2,home:1.15}[shipId]||1;
+    player.fireRate=Math.max(0.04,base*mul);
+  }
+  function addShot(x,y,vx,vy,opt){
+    opt=opt||{};
+    bullets.push({
+      x:x,y:y,vx:vx,vy:vy,
+      pierce:opt.pierce||0,home:opt.home||0,hit:null,
+      color:opt.color||currentShip().color,w:opt.w||4,h:opt.h||12
+    });
   }
   function shootVolley(){
-    const n=POWER_SHOTS[player.power];
-    const spd=700+player.power*40;
-    if(n<=1){bullets.push({x:player.x,y:player.y-20,vx:0,vy:-spd});return;}
-    const spread=0.06+player.power*0.035;
+    const p=player.power, ship=shipId, col=currentShip().color;
+    const spd=700+p*40;
+    if(ship==='rapid'){
+      const n=1+Math.floor((p-1)/2);
+      const gap=n===1?0:10;
+      for(let i=0;i<n;i++){
+        const ox=n===1?0:(i-(n-1)/2)*gap;
+        addShot(player.x+ox,player.y-20,0,-spd-80,{color:col,w:3,h:14});
+      }
+      return;
+    }
+    if(ship==='spread'){
+      const n=POWER_SHOTS[p]+2;
+      const spread=0.28+p*0.06;
+      for(let i=0;i<n;i++){
+        const u=i/(n-1), ang=-spread/2+u*spread;
+        addShot(player.x+(u-0.5)*34,player.y-14,Math.sin(ang)*spd, -Math.cos(ang)*spd,{color:col,w:3,h:10});
+      }
+      return;
+    }
+    if(ship==='pierce'){
+      const n=p>=5?3:p>=3?2:1;
+      for(let i=0;i<n;i++){
+        const ox=n===1?0:(i-(n-1)/2)*14;
+        addShot(player.x+ox,player.y-18,0,-spd,{color:col,w:6,h:16,pierce:1+Math.floor(p/2)});
+      }
+      return;
+    }
+    if(ship==='home'){
+      const n=1+Math.floor((p-1)/2);
+      for(let i=0;i<n;i++){
+        const ox=n===1?0:(i-(n-1)/2)*16;
+        const ang=ox*0.02;
+        addShot(player.x+ox,player.y-16,Math.sin(ang)*spd,-Math.cos(ang)*spd,{color:col,w:5,h:10,home:0.07+p*0.015});
+      }
+      return;
+    }
+    const n=POWER_SHOTS[p];
+    if(n<=1){addShot(player.x,player.y-20,0,-spd,{color:col});return;}
+    const spread=0.06+p*0.035;
     for(let i=0;i<n;i++){
-      const u=n===1?0.5:i/(n-1);
-      const ang=-spread/2+u*spread;
-      bullets.push({
-        x:player.x+(u-0.5)*26,
-        y:player.y-16,
-        vx:Math.sin(ang)*spd,
-        vy:-Math.cos(ang)*spd
-      });
+      const u=i/(n-1), ang=-spread/2+u*spread;
+      addShot(player.x+(u-0.5)*26,player.y-16,Math.sin(ang)*spd,-Math.cos(ang)*spd,{color:col});
     }
   }
 
@@ -296,7 +370,26 @@
     if(waveTimer>15 && !isBossWave() && !boss){ wave++; waveTimer=0; }
 
     // 子彈
-    for(const b of bullets){b.x+=(b.vx||0)*dt;b.y+=b.vy*dt;}
+    for(const b of bullets){
+      if(b.home){
+        let tx=null,ty=null,best=1e12;
+        for(const e of enemies){
+          const d=(e.x-b.x)*(e.x-b.x)+(e.y-b.y)*(e.y-b.y);
+          if(d<best){best=d;tx=e.x;ty=e.y;}
+        }
+        if(boss){
+          const d=(boss.x-b.x)*(boss.x-b.x)+(boss.y-b.y)*(boss.y-b.y);
+          if(d<best){tx=boss.x;ty=boss.y;}
+        }
+        if(tx!=null){
+          const ang=Math.atan2(ty-b.y,tx-b.x);
+          const spd=Math.hypot(b.vx,b.vy)||700;
+          b.vx=b.vx*(1-b.home)+Math.cos(ang)*spd*b.home;
+          b.vy=b.vy*(1-b.home)+Math.sin(ang)*spd*b.home;
+        }
+      }
+      b.x+=(b.vx||0)*dt;b.y+=b.vy*dt;
+    }
     bullets=bullets.filter(b=>b.y>-20&&b.x>-40&&b.x<W+40);
     // 敵機子彈
     for(const b of ebullets){b.x+=b.vx*dt;b.y+=b.vy*dt;}
@@ -336,9 +429,12 @@
       for(let j=bullets.length-1;j>=0;j--){
         const b=bullets[j];
         const dx=b.x-e.x,dy=b.y-e.y;
+        if(b.hit===e)continue;
         if(dx*dx+dy*dy<(e.r+4)*(e.r+4)){
-          bullets.splice(j,1);e.hp--;
+          e.hp--;
           boom(b.x,b.y,e.color,4);
+          if(b.pierce>0){b.pierce--;b.hit=e;}
+          else bullets.splice(j,1);
           if(e.hp<=0){
             score+=e.score*mult; combo++; mult=1+Math.min(9,Math.floor(combo/8));
             boom(e.x,e.y,e.color,18); drop(e.x,e.y); shake=.4;
@@ -370,9 +466,11 @@
         if(!boss)break;
         const b=bullets[j];
         const dx=b.x-boss.x,dy=b.y-boss.y;
+        if(b.hit==='boss')continue;
         if(dx*dx+dy*dy<(boss.r+4)*(boss.r+4)){
-          bullets.splice(j,1);
           boss.hp--;
+          if(b.pierce>0){b.pierce--;b.hit='boss';}
+          else bullets.splice(j,1);
           if(boss.hp<=0){defeatBoss();break;}
         }
       }
@@ -447,8 +545,10 @@
     ctx.globalAlpha=1;
 
     // 子彈
-    ctx.fillStyle='#57ffb0';
-    for(const b of bullets){ctx.fillRect(b.x-2,b.y-8,4,12);}
+    for(const b of bullets){
+      ctx.fillStyle=b.color||'#57ffb0';
+      ctx.fillRect(b.x-(b.w||4)/2,b.y-(b.h||12)/2,b.w||4,b.h||12);
+    }
     // 敵機子彈
     for(const b of ebullets){
       ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,7);
@@ -487,13 +587,16 @@
     // 護盾
     if(p.shield>0){ctx.strokeStyle='rgba(79,209,255,.8)';ctx.lineWidth=3;
       ctx.beginPath();ctx.arc(0,0,p.r+8,0,7);ctx.stroke();}
-    // 機身
-    ctx.fillStyle='#eaf2ff';
+    const ship=currentShip();
+    ctx.fillStyle=ship.body;
     ctx.beginPath();ctx.moveTo(0,-18);ctx.lineTo(14,12);ctx.lineTo(0,4);ctx.lineTo(-14,12);ctx.closePath();ctx.fill();
-    // 翼
-    ctx.fillStyle='#4fd1ff';
+    ctx.fillStyle=ship.color;
     ctx.beginPath();ctx.moveTo(-14,12);ctx.lineTo(-22,16);ctx.lineTo(-10,6);ctx.closePath();
     ctx.moveTo(14,12);ctx.lineTo(22,16);ctx.lineTo(10,6);ctx.closePath();ctx.fill();
+    if(shipId==='pierce'){
+      ctx.fillStyle=ship.color;
+      ctx.fillRect(-2,-22,4,10);
+    }
     // 尾焰
     const f=Math.sin(t*30)*4;
     ctx.fillStyle='#ffb057';
