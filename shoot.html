@@ -77,7 +77,7 @@
   // ---- 狀態 ----
   let running=false,last=0,score=0,best=loadBest();
   let combo=0, mult=1, wave=1, waveTimer=0, spawnTimer=0, shake=0, t=0;
-  let boss=null;
+  let boss=null, bossClearedWave=0;
 
   const player={x:W/2,y:H-120,r:16,lives:3,fireCd:0,fireRate:.18,
     power:1,shield:0,inv:0,tilt:0};
@@ -118,7 +118,7 @@
   }
 
   function start(){
-    score=0;combo=0;mult=1;wave=1;waveTimer=0;spawnTimer=0;shake=0;t=0;boss=null;
+    score=0;combo=0;mult=1;wave=1;waveTimer=0;spawnTimer=0;shake=0;t=0;boss=null;bossClearedWave=0;
     player.x=W/2;player.y=H-120;player.lives=3;player.fireCd=0;
     player.power=1;applyPower();player.shield=0;player.inv=0;
     bullets=[];ebullets=[];enemies=[];parts=[];drops=[];
@@ -154,6 +154,7 @@
   }
   function isBossWave(){return wave>0&&wave%5===0;}
   function spawnBoss(){
+    if(boss||bossClearedWave===wave)return;
     const n=Math.max(1,Math.floor(wave/5));
     const kind=n%3;
     const names=['哨艦魔王','環射魔王','追擊魔王'];
@@ -167,6 +168,8 @@
   }
   function bossShoot(){
     const b=boss;
+    if(!b)return;
+    if(ebullets.length>200)return;
     if(b.kind===0){
       for(let k=-3;k<=3;k++)ebullets.push({x:b.x,y:b.y+28,vx:k*70,vy:230,r:6});
     }else if(b.kind===1){
@@ -191,8 +194,31 @@
   }
 
   function boom(x,y,color,n=14){
+    if(parts.length>180)return;
+    n=Math.min(n,20);
     for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,s=rand(60,260);
       parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:rand(.3,.7),max:.7,r:rand(2,5),color});}
+  }
+  function trimArrays(){
+    if(bullets.length>280)bullets.splice(0,bullets.length-280);
+    if(ebullets.length>220)ebullets.splice(0,ebullets.length-220);
+    if(parts.length>180)parts.splice(0,parts.length-180);
+  }
+  function defeatBoss(){
+    if(!boss)return;
+    const bx=boss.x,by=boss.y,bc=boss.color||'#ffb057',sc=boss.score||500;
+    const fromWave=wave;
+    boss=null;
+    bossClearedWave=fromWave;
+    wave=fromWave+1;
+    waveTimer=0;
+    bullets=bullets.filter(function(b){
+      const dx=b.x-bx,dy=b.y-by;
+      return dx*dx+dy*dy>90*90;
+    });
+    score+=sc*mult;combo+=10;mult=1+Math.min(9,Math.floor(combo/8));
+    boom(bx,by,bc,20);shake=1.2;
+    drop(bx,by);drop(bx-40,by);drop(bx+40,by);drop(bx,by-20);
   }
   function drop(x,y){
     if(Math.random()<.18){
@@ -251,7 +277,7 @@
 
     // 波次與生成
     waveTimer+=dt;
-    if(isBossWave() && !boss && waveTimer>1.2){
+    if(isBossWave() && !boss && waveTimer>1.2 && bossClearedWave!==wave){
       spawnBoss();
     }
     spawnTimer-=dt;
@@ -272,21 +298,18 @@
     // 己方子彈抵銷敵彈
     for(let i=ebullets.length-1;i>=0;i--){
       const eb=ebullets[i];
-      let gone=false;
       for(let j=bullets.length-1;j>=0;j--){
         const b=bullets[j];
         const dx=b.x-eb.x,dy=b.y-eb.y;
         const r=(eb.r||5)+6;
         if(dx*dx+dy*dy<r*r){
-          boom(eb.x,eb.y,'#fff',6);
           bullets.splice(j,1);
           ebullets.splice(i,1);
-          gone=true;
           break;
         }
       }
-      if(gone)continue;
     }
+    trimArrays();
 
     // 敵機
     for(let i=enemies.length-1;i>=0;i--){
@@ -318,11 +341,13 @@
     }
 
     // Boss
+    if(boss && boss.hp<=0)defeatBoss();
     if(boss){
       if(boss.entering){boss.y+=boss.vy*dt;if(boss.y>=110){boss.y=110;boss.entering=false;}}
       else{
-        boss.x+=boss.dir*(90+wave*4)*dt;
-        if(boss.x<70){boss.x=70;boss.dir=1;}
+        const dir=boss.dir||1;
+        boss.x+=dir*(90+wave*4)*dt;
+        if(boss.x<70||boss.x!==boss.x){boss.x=70;boss.dir=1;}
         if(boss.x>W-70){boss.x=W-70;boss.dir=-1;}
         boss.y=110+Math.sin(t*1.4)*16;
         boss.fire-=dt;
@@ -332,20 +357,14 @@
           bossShoot();
         }
       }
-      // 打 Boss（擊敗後立刻離開迴圈，避免同一幀多發子彈把遊戲打當）
-      for(let j=bullets.length-1;j>=0 && boss;j--){
+      for(let j=bullets.length-1;j>=0;j--){
+        if(!boss)break;
         const b=bullets[j];
         const dx=b.x-boss.x,dy=b.y-boss.y;
         if(dx*dx+dy*dy<(boss.r+4)*(boss.r+4)){
-          bullets.splice(j,1);boss.hp--;boom(b.x,b.y,boss.color,3);
-          if(boss.hp<=0){
-            const bx=boss.x,by=boss.y,bc=boss.color,sc=boss.score;
-            score+=sc*mult;combo+=10;mult=1+Math.min(9,Math.floor(combo/8));
-            boom(bx,by,bc,48);shake=1.2;
-            drop(bx,by);drop(bx-40,by);drop(bx+40,by);drop(bx,by-20);
-            boss=null; wave++; waveTimer=0;
-            break;
-          }
+          bullets.splice(j,1);
+          boss.hp--;
+          if(boss.hp<=0){defeatBoss();break;}
         }
       }
     }
@@ -504,7 +523,7 @@
   function loop(now){
     if(!running)return;
     let dt=(now-last)/1000;last=now;dt=Math.min(dt,.05);
-    update(dt);draw();
+    try{update(dt);draw();}catch(err){console.error(err);}
     requestAnimationFrame(loop);
   }
 
