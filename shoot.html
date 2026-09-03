@@ -15,7 +15,7 @@
   #hud{position:fixed;top:12px;left:14px;font-size:18px;font-weight:700;
     text-shadow:0 2px 6px rgba(0,0,0,.7);pointer-events:none;z-index:5;line-height:1.6}
   #hud .mult{color:#57ffb0}
-  #hearts{position:fixed;top:12px;right:14px;font-size:20px;pointer-events:none;z-index:5;letter-spacing:2px}
+  #hearts{position:fixed;top:12px;right:14px;max-width:48vw;font-size:16px;pointer-events:none;z-index:5;letter-spacing:1px;text-align:right;line-height:1.35}
   #overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
     justify-content:center;gap:14px;background:rgba(5,6,15,.78);backdrop-filter:blur(3px);
     text-align:center;padding:20px;z-index:10}
@@ -37,7 +37,7 @@
   <h2>🚀 霓虹太空射擊</h2>
   <p>拖曳控制戰機，自動開火擊破敵軍。<br>
      擊破越多連擊倍率越高。每 5 波會出現魔王！<br>
-     掉落：<b>❤️</b> 加命 · <b>🔥</b> 火力/射速升級（可疊到 Lv6） · <b>🛡️</b> 護盾 · <b>⚡</b> 清場</p>
+     掉落：<b>❤️</b> 加命（最多 10 顆） · <b>🔥</b> 火力/射速升級（可疊到 Lv6） · <b>🛡️</b> 護盾 · <b>⚡</b> 清場</p>
   <button id="btn">開始遊戲</button>
 </div>
 
@@ -67,7 +67,7 @@
   const elWave=document.getElementById('wave'), elHearts=document.getElementById('hearts');
   const elPower=document.getElementById('power');
   const overlay=document.getElementById('overlay'), btn=document.getElementById('btn');
-  const POWER_MAX=6;
+  const POWER_MAX=6, LIFE_MAX=10;
   const POWER_RATE=[0,0.18,0.15,0.12,0.10,0.08,0.06];
   const POWER_SHOTS=[0,1,2,3,4,5,7];
 
@@ -94,7 +94,7 @@
     elMult.textContent='x'+mult;
     elWave.textContent=isBossWave()||boss?(wave+' 魔王'):wave;
     elPower.textContent=player.power>=POWER_MAX?'Lv6 滿等':'Lv'+player.power;
-    elHearts.textContent='❤'.repeat(Math.max(0,player.lives))+'♡'.repeat(Math.max(0,3-player.lives));
+    elHearts.textContent='❤'.repeat(Math.max(0,player.lives))+'♡'.repeat(Math.max(0,LIFE_MAX-player.lives));
   }
   function applyPower(){
     player.power=Math.max(1,Math.min(POWER_MAX,player.power));
@@ -332,18 +332,19 @@
           bossShoot();
         }
       }
-      // 打 Boss
-      for(let j=bullets.length-1;j>=0;j--){
+      // 打 Boss（擊敗後立刻離開迴圈，避免同一幀多發子彈把遊戲打當）
+      for(let j=bullets.length-1;j>=0 && boss;j--){
         const b=bullets[j];
         const dx=b.x-boss.x,dy=b.y-boss.y;
         if(dx*dx+dy*dy<(boss.r+4)*(boss.r+4)){
-          bullets.splice(j,1);boss.hp--;boom(b.x,b.y,'#ffb057',3);
+          bullets.splice(j,1);boss.hp--;boom(b.x,b.y,boss.color,3);
           if(boss.hp<=0){
-            score+=boss.score*mult;combo+=10;mult=1+Math.min(9,Math.floor(combo/8));
-            boom(boss.x,boss.y,boss.color,48);shake=1.2;
-            drop(boss.x,boss.y);drop(boss.x-40,boss.y);drop(boss.x+40,boss.y);
-            drop(boss.x,boss.y-20);
+            const bx=boss.x,by=boss.y,bc=boss.color,sc=boss.score;
+            score+=sc*mult;combo+=10;mult=1+Math.min(9,Math.floor(combo/8));
+            boom(bx,by,bc,48);shake=1.2;
+            drop(bx,by);drop(bx-40,by);drop(bx+40,by);drop(bx,by-20);
             boss=null; wave++; waveTimer=0;
+            break;
           }
         }
       }
@@ -377,7 +378,7 @@
       const d=drops[i];d.y+=d.vy*dt;d.life-=dt;
       const dx=d.x-player.x,dy=d.y-player.y;
       if(dx*dx+dy*dy<(player.r+14)*(player.r+14)){
-        if(d.type==='heart')player.lives=Math.min(5,player.lives+1);
+        if(d.type==='heart')player.lives=Math.min(LIFE_MAX,player.lives+1);
         else if(d.type==='double'){player.power=Math.min(POWER_MAX,player.power+1);applyPower();}
         else if(d.type==='shield')player.shield=5;
         else if(d.type==='nuke'){for(const e of enemies){boom(e.x,e.y,e.color,10);score+=e.score*mult;}enemies.length=0;
